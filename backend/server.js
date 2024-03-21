@@ -4,8 +4,8 @@ const cors = require("cors");
 const mysql = require("mysql2");
 const redis = require("redis");
 const axios = require("axios");
-const config =require('./config.js');
-const fs=require('fs')
+const config = require("./config.js");
+const fs = require("fs");
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -13,7 +13,7 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-console.log(config.db)
+console.log(config.db);
 // Create connection to MySQL databa
 const db = mysql.createConnection({
   host: config.db.host,
@@ -22,9 +22,9 @@ const db = mysql.createConnection({
   database: config.db.database,
   port: 16006,
   ssl: {
-    mode: 'REQUIRED',
-    ca:fs.readFileSync("./backend/ca.pem").toString(),
-  }
+    mode: "REQUIRED",
+    ca: fs.readFileSync("./backend/ca.pem").toString(),
+  },
 });
 
 db.connect((err) => {
@@ -34,15 +34,13 @@ db.connect((err) => {
   console.log("Connected to MySQL database");
 });
 
-
 const redisClient = redis.createClient({
   password: config.redis.password,
-    socket: {
-        host: config.redis.host,
-        port: config.redis.port
-    }
+  socket: {
+    host: config.redis.host,
+    port: config.redis.port,
+  },
 });
-
 
 redisClient.on("error", (err) => {
   console.error("Redis error:", err);
@@ -50,8 +48,8 @@ redisClient.on("error", (err) => {
 const connect = async () => {
   await redisClient.connect();
 };
- connect();
-const headers={
+connect();
+const headers = {
   "content-type": "application/json",
   "Content-Type": "application/json",
   "X-RapidAPI-Key": config.rapid.key,
@@ -64,7 +62,7 @@ const submit = async (input) => {
     params: {
       base64_encoded: "false",
       fields: "*",
-      wait: 'true',
+      wait: "true",
     },
     headers: headers,
     data: input,
@@ -91,59 +89,52 @@ app.post("/submit", async (req, res) => {
   };
   const output = await submit(input);
 
-  if(output.status.id!=3){
+  if (output.status.id != 3) {
     console.log(1);
-    res.status(500).json({ message: output.status.description } );
-    
-  }
-  else{
-    console.log(2)
-  const sql =
-    "INSERT INTO code_snippets (username, language, stdin, source_code, stdout) VALUES (?, ?, ?, ?,?)";
-  db.query(
-    sql,
-    [username, language, stdin, sourceCode, output['stdout']],
-    (err, result) => {
-      if (err) {
-        console.log(3)
-        // console.log(err);
-        res.status(500).json({ message: "Failed to submit code snippet" });
-      } else {
-        // Clear cache upon submission to ensure fresh data on next fetch
-        console.log(4)
-        redisClient.FLUSHALL();
-        console.log(5)
-        res
-          .status(201)
-          .json({ message: "Code snippet submitted successfully" });
-        return;
-        console.log(6)
-      }
+    res.status(500).json({ message: output.status.description });
+  } else {
+    console.log(2);
+    const sql =
+      "INSERT INTO code_snippets (username, language, stdin, source_code, stdout) VALUES (?, ?, ?, ?,?)";
+    const flag = true;
+    try {
+      const [result] = await db.promise().query(sql, [
+        username,
+        language,
+        stdin,
+        sourceCode,
+        output["stdout"],
+      ]);
+      await redisClient.FLUSHALL();
+      res.status(201).json({ message: "Code snippet submitted successfully" });
+    } catch {
+      console.log("error")
+      res.status(500).json({ message: "Error Submitting code snippet" });
     }
-  );
   }
 });
 
-
-
-app.get("/codeSnippets", async(req, res) => {
+app.get("/codeSnippets", async (req, res) => {
   // console.log("bro");
-  const data=await redisClient.get('submissions')
-  if(data){
-    res.status(200).json(JSON.parse(data))
+  const data = await redisClient.get("submissions");
+  if (data) {
+    res.status(200).json(JSON.parse(data));
+
   }
+  else{
   const sql =
     "SELECT username, language, stdin, stdout,LEFT(source_code, 100) AS source_code_preview, timestamp FROM code_snippets";
-  db.query(sql, (err, result) => {
+  db.query(sql, async (err, result) => {
     if (err) {
       res.status(500).json({ message: "Failed to fetch code snippets" });
     } else {
       // Cache fetched data in Redis
 
-      redisClient.setEx("submissions", 3600, JSON.stringify(result)); 
+      await redisClient.setEx("submissions", 3600, JSON.stringify(result));
       res.status(200).json(result);
     }
   });
+  }
 });
 
 app.listen(port, () => {
